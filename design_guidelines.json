@@ -1,0 +1,169 @@
+{
+  "app_name": "ServeSync",
+  "personality": "1 iOS-Native Clean",
+  "personality_one_liner": "A warm, high-efficiency, restaurant-grade POS and order-taking system blending clean iOS utility with earthy hospitality tones.",
+  "color": {
+    "surface": "#FAF9F6",
+    "onSurface": "#1C1C1E",
+    "surfaceSecondary": "#FFFFFF",
+    "onSurfaceSecondary": "#1C1C1E",
+    "surfaceTertiary": "#F0EFEB",
+    "onSurfaceTertiary": "#3A3A3C",
+    "surfaceInverse": "#1C1C1E",
+    "onSurfaceInverse": "#FAF9F6",
+    "brand": "#C85A40",
+    "brandPrimary": "#C85A40",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#E8A38B",
+    "onBrandSecondary": "#4A1C10",
+    "brandTertiary": "#F7E5DE",
+    "onBrandTertiary": "#8A311A",
+    "success": "#4A7C59",
+    "onSuccess": "#FFFFFF",
+    "warning": "#D99B48",
+    "onWarning": "#FFFFFF",
+    "error": "#B33939",
+    "onError": "#FFFFFF",
+    "info": "#5C6B73",
+    "onInfo": "#FFFFFF",
+    "border": "#E5E5EA",
+    "borderStrong": "#C7C7CC",
+    "divider": "#E5E5EA"
+  },
+  "typography": {
+    "displayFontFamily": "Plus Jakarta Sans",
+    "textFontFamily": "Plus Jakarta Sans",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous padding around content. Use standard iOS spacing rhythms. Forms should have inputs with comfortable vertical padding.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": "1",
+  "navigation": "mixed (drawer/sidebar for Tablet, bottom_tabs for Phone)",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": true,
+    "do's": [
+      "Use glass on Phone's bottom tab bar",
+      "Use glass for the Cart Bottom Sheet header",
+      "Sticky headers over scrolling menus"
+    ],
+    "dont's": [
+      "No glass on Kanban board cards",
+      "No glass on form inputs or dense data tables"
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Role Picker",
+      "purpose": "First launch screen to select device form factor and role.",
+      "states": {
+        "loading": "Spinner",
+        "empty": "N/A",
+        "error": "N/A"
+      },
+      "layout": "Two massive cards stacked vertically on phone, or side-by-side on tablet. Card 1: 'This is the Server (Tablet)' with a tablet icon. Card 2: 'I'm a Waiter (Phone)' with a phone icon. Warm surfaceTertiary backgrounds."
+    },
+    {
+      "name": "Waiter - Join",
+      "purpose": "Pairing screen for waiter.",
+      "states": {
+        "loading": "Connecting spinner",
+        "empty": "N/A",
+        "error": "Invalid code toast"
+      },
+      "layout": "Centered form. Large monospace input for 4-digit Pairing Code. Standard input for Waiter Name. Sticky primary CTA at the bottom."
+    },
+    {
+      "name": "Waiter - Menu",
+      "purpose": "Primary order-taking interface optimized for speed and one-handed thumb use.",
+      "states": {
+        "loading": "Skeleton grid",
+        "empty": "Illustration: No menu items configured",
+        "error": "Connection lost banner"
+      },
+      "layout": "Sticky Header: Table number selector (large target). Below header: Horizontal scroll view for category pills. Main content: List/Grid of menu items. Each item has title, price, and a large '+' icon button. Bottom: Fixed cart preview summary that expands into a full bottom sheet."
+    },
+    {
+      "name": "Waiter - Cart Bottom Sheet",
+      "purpose": "Review order and submit to kitchen.",
+      "layout": "Glassmorphism header with drag handle. List of selected items with quantity adjusters (+/-). Sticky 'Submit Order' button at the bottom."
+    },
+    {
+      "name": "Tablet - Dashboard/Kanban",
+      "purpose": "Kitchen Display System (KDS) showing live orders.",
+      "states": {
+        "loading": "Skeleton columns",
+        "empty": "Illustration: Kitchen is quiet",
+        "error": "WebSocket disconnected banner"
+      },
+      "layout": "Sidebar nav on left. Top header shows huge Pairing Code. Main area: 4-column horizontal scroll Kanban board (New, Preparing, Ready, Served). Orders are cards with status color indicators (warning/ochre for preparing, success/sage for ready)."
+    },
+    {
+      "name": "Tablet - Menu Editor",
+      "purpose": "Admin view to add/edit menu categories and items.",
+      "layout": "Split view. Left pane: Categories. Right pane: Item list with quick-toggle switches for 'Available/Out of Stock'."
+    }
+  ],
+  "images": {
+    "role_picker_bg": {
+      "url": "https://images.unsplash.com/photo-1681725142773-5756fad63e93?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1ODh8MHwxfHNlYXJjaHwyfHxjYWZlJTIwY29mZmVlJTIwcGFzdHJ5JTIwcnVzdGljfGVufDB8fHx8MTc4MjA2NTk3NHww&ixlib=rb-4.1.0&q=85",
+      "alt": "Rustic cafe table with plates of food"
+    },
+    "kitchen_tablet_hero": {
+      "url": "https://images.pexels.com/photos/12935057/pexels-photo-12935057.jpeg",
+      "alt": "Chef using a tablet to manage kitchen orders"
+    },
+    "waiter_phone_hero": {
+      "url": "https://images.unsplash.com/photo-1544633909-3de7702b9602?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzd8MHwxfHNlYXJjaHwzfHxwZXJzb24lMjBob2xkaW5nJTIwcGhvbmUlMjByZXN0YXVyYW50fGVufDB8fHx8MTc4MjIxMzIwMHww&ixlib=rb-4.1.0&q=85",
+      "alt": "Waiter taking order on phone"
+    }
+  },
+  "haptics": {
+    "add_to_cart": "light",
+    "submit_order": "success",
+    "change_order_status": "medium",
+    "regenerate_pairing_code": "heavy",
+    "toggle_availability": "light"
+  },
+  "instructions_to_main_agent": [
+    "Strictly follow the color palette. Do NOT use any blues or purples. The primary accent is Terracotta (#C85A40), success is Sage Green (#4A7C59), and warning is Ochre (#D99B48).",
+    "Architecture: Create two distinct flow roots based on the first-launch Role Picker. If 'Tablet', load the Sidebar + Kanban layout. If 'Waiter', load the Stack + Bottom Tabs layout.",
+    "Tablet Kanban Board: Must support horizontal scrolling for the board itself, and vertical scrolling for the cards inside each column. Use color-coded left borders on the cards based on their status.",
+    "Waiter Phone Menu: Optimize for speed. The 'Add' button on menu items should be large (min 44x44) and easily reachable. Use a fixed Cart Summary component at the bottom of the screen (above safe area) that opens the @gorhom/bottom-sheet.",
+    "Implement tactile feedback using the haptics mapping. Speed and confirmation are critical in a restaurant environment.",
+    "Pairing Code: Display this prominently in the Tablet header. It must be massive and readable from a few feet away. Mock the pairing logic by saving the code and role to AsyncStorage or context.",
+    "When a waiter submits an order, mock the real-time push by instantly reflecting it in the Tablet's 'New' column via shared state/context (simulate WebSocket locally for MVP)."
+  ]
+}
