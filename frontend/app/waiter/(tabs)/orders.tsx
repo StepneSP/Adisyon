@@ -12,7 +12,6 @@ import { OrderEditor } from "@/src/components/OrderEditor";
 import { KitchenTicket } from "@/src/components/KitchenTicket";
 import { BillSplitter } from "@/src/components/BillSplitter";
 import { useToast } from "@/src/components/Toast";
-
 export default function WaiterOrders() {
   const [code, setCode] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -23,6 +22,7 @@ export default function WaiterOrders() {
   const [editing, setEditing] = useState<Order | null>(null);
   const [ticket, setTicket] = useState<Order | null>(null);
   const [splitting, setSplitting] = useState<Order | null>(null);
+  const [servingId, setServingId] = useState<string | null>(null);
 
   const toast = useToast();
   const statusMap = useRef<Record<string, string>>({});
@@ -50,21 +50,14 @@ export default function WaiterOrders() {
       if ((m.event === "order_created" || m.event === "order_updated") && m.order) {
         const o = m.order as Order;
         const prevStatus = statusMap.current[o.id];
-        // Fire toast if MY order transitions into ready or served
+        // Fire toast if MY order transitions into ready
         if (o.waiter_name === name && prevStatus && prevStatus !== o.status) {
           if (o.status === "ready") {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
             toast.show({
               kind: "success",
               title: `Table ${o.table_number} · Ready for pickup`,
-              message: "The kitchen has your order ready.",
-            });
-          } else if (o.status === "served") {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-            toast.show({
-              kind: "success",
-              title: `Table ${o.table_number} · Order finished`,
-              message: "Marked served by the kitchen.",
+              message: "The kitchen has your order ready — deliver and mark served.",
             });
           }
         }
@@ -76,6 +69,24 @@ export default function WaiterOrders() {
       }
     },
     [name, toast],
+  );
+
+  const markServed = useCallback(
+    async (o: Order) => {
+      if (!code) return;
+      setServingId(o.id);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+      try {
+        const updated = await api.updateOrderStatus(code, o.id, "served");
+        setOrders((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+        toast.show({ kind: "success", title: `Table ${o.table_number} · Served`, message: "Nice work." });
+      } catch (e: any) {
+        toast.show({ kind: "error", title: "Could not mark served", message: e?.message || "Try again" });
+      } finally {
+        setServingId(null);
+      }
+    },
+    [code, toast],
   );
 
   useRoomSocket(code, onMessage);
@@ -101,13 +112,14 @@ export default function WaiterOrders() {
 
   const renderCard = (o: Order, isPast = false) => {
     const meta = statusMeta[o.status];
-    const canEdit = !isPast;
+    const canEdit = !isPast && o.status !== "ready";
+    const isReady = o.status === "ready";
     return (
       <Pressable
         key={o.id}
         testID={`waiter-order-card-${o.id}`}
         onPress={() => canEdit && setEditing(o)}
-        style={[styles.card, isPast && { opacity: 0.85 }]}
+        style={[styles.card, isReady && styles.cardReady, isPast && { opacity: 0.85 }]}
       >
         <View style={styles.cardTop}>
           <Text style={styles.tableTag}>Table {o.table_number}</Text>
@@ -124,6 +136,23 @@ export default function WaiterOrders() {
             </View>
           ))}
         </View>
+        {isReady ? (
+          <Pressable
+            testID={`waiter-mark-served-${o.id}`}
+            onPress={() => markServed(o)}
+            disabled={servingId === o.id}
+            style={[styles.servedBtn, servingId === o.id && { opacity: 0.6 }]}
+          >
+            {servingId === o.id ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                <Feather name="check-circle" size={18} color="#fff" />
+                <Text style={styles.servedBtnText}>Mark as Served</Text>
+              </>
+            )}
+          </Pressable>
+        ) : null}
         <View style={styles.actionsRow}>
           <Pressable
             testID={`waiter-ticket-${o.id}`}
@@ -304,6 +333,18 @@ const styles = StyleSheet.create({
     backgroundColor: theme.color.brandTint,
   },
   smallBtnText: { color: theme.color.brand, fontWeight: "700", fontSize: theme.font.sm },
+  cardReady: { borderColor: theme.color.success, borderWidth: 2 },
+  servedBtn: {
+    marginTop: theme.space.md,
+    backgroundColor: theme.color.success,
+    paddingVertical: theme.space.md,
+    borderRadius: theme.radius.md,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: theme.space.sm,
+  },
+  servedBtnText: { color: "#fff", fontWeight: "700", fontSize: theme.font.lg },
   empty: { alignItems: "center", padding: theme.space.xxxl, gap: theme.space.md },
   emptyText: { color: theme.color.onSurfaceMuted, textAlign: "center" },
 });

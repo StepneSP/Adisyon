@@ -553,23 +553,18 @@ async def update_order_status(code: str, order_id: str, payload: OrderStatusUpda
     order_out = clean(o)
     await manager.broadcast(code, {"event": "order_updated", "order": order_out})
 
-    # Push notification to the waiter for ready/served transitions
-    if payload.status in ("ready", "served"):
+    # Push notification to the waiter when order is ready to pick up
+    # (waiters are the ones who mark orders as served, so no push on served)
+    if payload.status == "ready":
         try:
-            title = (
-                f"Table {order_out['table_number']} · Ready for pickup"
-                if payload.status == "ready"
-                else f"Table {order_out['table_number']} · Order finished"
-            )
-            message = (
-                "The kitchen has your order ready to serve."
-                if payload.status == "ready"
-                else "The kitchen has marked your order as served."
-            )
             await send_push(
                 recipients=[push_user_id(code, order_out["waiter_name"])],
-                data={"title": title, "message": message, "action_url": "/waiter/orders"},
-                idempotency_key=f"{order_out['id']}-{payload.status}",
+                data={
+                    "title": f"Table {order_out['table_number']} · Ready for pickup",
+                    "message": "The kitchen has your order ready — deliver and mark served.",
+                    "action_url": "/waiter/orders",
+                },
+                idempotency_key=f"{order_out['id']}-ready",
             )
         except Exception as e:
             logging.getLogger(__name__).warning("push failed (non-blocking): %s", e)

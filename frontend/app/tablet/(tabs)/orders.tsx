@@ -31,7 +31,7 @@ const COLUMNS: { key: Order["status"]; title: string }[] = [
 const NEXT: Record<Order["status"], Order["status"] | null> = {
   new: "preparing",
   preparing: "ready",
-  ready: "served",
+  ready: null,        // Waiter now owns the Ready→Served transition
   served: null,
   cancelled: null,
 };
@@ -233,14 +233,10 @@ export default function TabletOrders() {
                         ) : null}
 
                         {o.status === "ready" ? (
-                          <Pressable
-                            testID={`finish-order-${o.id}`}
-                            style={[styles.advanceBtn, { backgroundColor: theme.color.success }]}
-                            onPress={() => advance(o)}
-                          >
-                            <Feather name="check-circle" size={16} color="#fff" />
-                            <Text style={styles.advanceBtnText}>Finish order</Text>
-                          </Pressable>
+                          <View style={styles.waitingHint}>
+                            <Feather name="clock" size={14} color={theme.color.success} />
+                            <Text style={styles.waitingHintText}>Waiting for waiter to serve</Text>
+                          </View>
                         ) : NEXT[o.status] ? (
                           <Pressable
                             testID={`advance-order-${o.id}`}
@@ -274,13 +270,6 @@ export default function TabletOrders() {
         onClose={() => setEditing(null)}
         code={code || ""}
         order={editing}
-        showFinish={editing?.status === "ready"}
-        onFinish={async () => {
-          if (editing) {
-            await advance(editing);
-            setEditing(null);
-          }
-        }}
         onSaved={(o) => setOrders((prev) => prev.map((x) => (x.id === o.id ? o : x)))}
       />
       <KitchenTicket
@@ -392,4 +381,15 @@ const styles = StyleSheet.create({
     gap: theme.space.sm,
   },
   advanceBtnText: { color: "#fff", fontWeight: "700", fontSize: theme.font.base },
+  waitingHint: {
+    marginTop: theme.space.sm,
+    paddingVertical: theme.space.md,
+    borderRadius: theme.radius.md,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "#E3EFE5",
+  },
+  waitingHintText: { color: theme.color.success, fontWeight: "600", fontSize: theme.font.sm },
 });
