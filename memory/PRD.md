@@ -39,5 +39,9 @@ All under `/api`:
 
 ## Not built (future)
 - Multi-tenant auth (currently pairing-code only per requirements)
-- Push notifications (in-app toast used instead)
-- Kitchen ticket printing
+- Kitchen printing to a physical thermal printer (currently uses `expo-print` → OS print dialog or PDF share)
+
+## Iteration 2 additions
+- **Expo Push (iOS)** via Emergent-managed relay: `POST /api/register-push`, backend triggers on order → ready/served with per-waiter `user_id = {room_code}:{waiter_name}`. Non-blocking — order status still returns 200 if relay unavailable. Preview key is `placeholder`; auto-swapped at deploy. Requires a deployed iOS build to actually fire (does NOT work in Expo Go / preview browser).
+- **Kitchen ticket** — receipt-styled preview accessible from Order card ("Ticket" button) on both tablet and waiter. Uses `expo-print`+`expo-sharing` for Save-as-PDF and OS print dialog.
+- **Bill splitter** — Equal (people + tip %) and By-items (assign each line to P1/P2/… with unassigned warning + proportional tip redistribution). Accessible on served orders from tablet + waiter Orders cards.
