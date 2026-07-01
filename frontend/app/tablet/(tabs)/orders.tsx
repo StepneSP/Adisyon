@@ -18,6 +18,8 @@ import { session } from "@/src/lib/session";
 import { useRoomSocket } from "@/src/lib/useRoomSocket";
 import { SettingsSheet } from "@/src/components/SettingsSheet";
 import { OrderEditor } from "@/src/components/OrderEditor";
+import { KitchenTicket } from "@/src/components/KitchenTicket";
+import { BillSplitter } from "@/src/components/BillSplitter";
 
 const COLUMNS: { key: Order["status"]; title: string }[] = [
   { key: "new", title: "New" },
@@ -42,6 +44,8 @@ export default function TabletOrders() {
   const [restaurantName, setRestaurantName] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [editing, setEditing] = useState<Order | null>(null);
+  const [ticket, setTicket] = useState<Order | null>(null);
+  const [splitting, setSplitting] = useState<Order | null>(null);
 
   const refreshName = useCallback(async (c: string) => {
     try {
@@ -192,11 +196,38 @@ export default function TabletOrders() {
                               <Text style={styles.editBtnText}>Edit</Text>
                             </Pressable>
                             <Pressable
+                              testID={`ticket-order-${o.id}`}
+                              onPress={() => setTicket(o)}
+                              style={styles.editBtn}
+                            >
+                              <Feather name="printer" size={14} color={theme.color.onSurface} />
+                              <Text style={styles.editBtnText}>Ticket</Text>
+                            </Pressable>
+                            <Pressable
                               testID={`cancel-order-${o.id}`}
                               onPress={() => cancelOrder(o)}
                               style={styles.cancelBtn}
                             >
                               <Feather name="x" size={14} color={theme.color.error} />
+                            </Pressable>
+                          </View>
+                        ) : o.status === "served" ? (
+                          <View style={styles.actions}>
+                            <Pressable
+                              testID={`ticket-order-${o.id}`}
+                              onPress={() => setTicket(o)}
+                              style={styles.editBtn}
+                            >
+                              <Feather name="printer" size={14} color={theme.color.onSurface} />
+                              <Text style={styles.editBtnText}>Ticket</Text>
+                            </Pressable>
+                            <Pressable
+                              testID={`split-order-${o.id}`}
+                              onPress={() => setSplitting(o)}
+                              style={styles.editBtn}
+                            >
+                              <Feather name="divide" size={14} color={theme.color.onSurface} />
+                              <Text style={styles.editBtnText}>Split bill</Text>
                             </Pressable>
                           </View>
                         ) : null}
@@ -251,6 +282,17 @@ export default function TabletOrders() {
           }
         }}
         onSaved={(o) => setOrders((prev) => prev.map((x) => (x.id === o.id ? o : x)))}
+      />
+      <KitchenTicket
+        visible={!!ticket}
+        onClose={() => setTicket(null)}
+        code={code || ""}
+        order={ticket}
+      />
+      <BillSplitter
+        visible={!!splitting}
+        onClose={() => setSplitting(null)}
+        order={splitting}
       />
     </SafeAreaView>
   );

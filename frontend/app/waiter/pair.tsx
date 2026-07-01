@@ -16,6 +16,7 @@ import * as Haptics from "expo-haptics";
 import { theme } from "@/src/lib/theme";
 import { api } from "@/src/lib/api";
 import { session } from "@/src/lib/session";
+import { registerForPush } from "@/src/lib/push";
 
 export default function WaiterPair() {
   const router = useRouter();
@@ -48,6 +49,8 @@ export default function WaiterPair() {
       await api.getRoom(c);
       await session.setCode(c);
       await session.setWaiterName(n);
+      // Best-effort push registration — silently no-ops in Expo Go / web.
+      registerForPush(c, n).catch(() => {});
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       router.replace("/waiter");
     } catch {

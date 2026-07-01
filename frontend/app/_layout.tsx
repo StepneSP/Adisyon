@@ -1,11 +1,13 @@
-import { Stack } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
-import { LogBox } from "react-native";
+import { LogBox, Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import { StatusBar } from "expo-status-bar";
+import * as Notifications from "expo-notifications";
+import * as Linking from "expo-linking";
 
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { ToastProvider } from "@/src/components/Toast";
@@ -20,14 +22,67 @@ LogBox.ignoreAllLogs(true);
 // the family is registered — which throws on Android Expo Go.
 SplashScreen.preventAutoHideAsync();
 
+// -------- Push notifications: module-scope setup (before any component) --------
+if (Platform.OS !== "web") {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
+  });
+}
+
+if (Platform.OS === "android") {
+  Notifications.setNotificationChannelAsync("default", {
+    name: "Default",
+    importance: Notifications.AndroidImportance.MAX,
+    sound: "default",
+  });
+}
+
 export default function RootLayout() {
   const [loaded, error] = useIconFonts();
+  const router = useRouter();
 
   useEffect(() => {
     if (loaded || error) {
       SplashScreen.hideAsync();
     }
   }, [loaded, error]);
+
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+
+    const tapSub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = (response.notification.request.content.data || {}) as Record<string, string>;
+      const url = data.deeplink || data.action_url;
+      if (!url) return;
+      if (url.startsWith("http")) {
+        Linking.openURL(url);
+      } else {
+        router.push(url as any);
+      }
+    });
+
+    Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (!response) return;
+      const data = (response.notification.request.content.data || {}) as Record<string, string>;
+      const url = data.deeplink || data.action_url;
+      if (!url) return;
+      if (url.startsWith("http")) {
+        Linking.openURL(url);
+      } else {
+        router.push(url as any);
+      }
+    });
+
+    return () => {
+      tapSub.remove();
+    };
+  }, [router]);
 
   // If the CDN is unreachable we fall through on error rather than wedging
   // the app — icons will tofu, but the app still boots.

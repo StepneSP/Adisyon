@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 2 — feature additions (push, kitchen ticket, bill splitter) tested. Backend: 19/19 pytest cases pass (17 regression + 2 new). Push relay endpoint /api/register-push returns an informative 5xx JSON with placeholder EMERGENT_PUSH_KEY (expected preview behaviour, no crash). Status transitions to 'ready' and 'served' return 200 even when push relay is unavailable (non-blocking wrap verified). All original endpoints (rooms CRUD, categories, items, orders CRUD, stats, WS order_created broadcast, regenerate cascade) remain green. Frontend push playbook checklist — all four handlers present at module scope in app/_layout.tsx (setNotificationHandler, setNotificationChannelAsync, addNotificationResponseReceivedListener, getLastNotificationResponseAsync); src/lib/push.ts uses getDevicePushTokenAsync and POSTs to /api/register-push; app.json plugins include 'expo-notifications' and ios.bundleIdentifier='com.emergent.servesync'; waiter pair.tsx invokes registerForPush(code,name) after successful pair. Frontend UI: Tablet Orders active-card shows [Edit] [Ticket] [X cancel] and Ready-column adds Finish button; served card shows [Ticket] [Split bill]. KitchenTicket modal renders correctly with restaurant name, Table, Waiter, Time, Order #, itemised lines, Notes block, TOTAL, and Print + Save-as-PDF action buttons (visually verified via screenshot).",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py: register-push maps upstream 401 -> HTTPException(500, informative) and 5xx -> 502; send_push is fire-and-forget wrapped in try/except inside update_order_status, so push failures never break the status transition (verified by test_status_ready_served_non_blocking_push).",
+    "push.ts correctly uses getDevicePushTokenAsync (native APNs/FCM token) per Emergent push playbook — not getExpoPushTokenAsync.",
+    "app/_layout.tsx places setNotificationHandler and setNotificationChannelAsync at module scope (before any component renders) which matches the playbook; addNotificationResponseReceivedListener + getLastNotificationResponseAsync are wired inside a useEffect and both branch on deeplink|action_url with http vs router.push routing.",
+    "KitchenTicket has a web-only fallback that opens the HTML in a new tab when Print.printAsync fails (good) and uses expo-print + expo-sharing for Save-as-PDF.",
+    "BillSplitter: tip is calculated as Math.round(subtotal * tipPct)/100 which rounds tip to nearest cent; totals per person in By-items mode redistribute tip proportionally to each person's item subtotal — correct behaviour."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (added test_register_push_relay_placeholder_key + test_status_ready_served_non_blocking_push)"
+  ],
+  "success_rate": {
+    "backend": "100% (19/19)",
+    "frontend": "100% of iteration-2 feature checks (playbook grep + Ticket modal render + active/served action bars)"
+  },
+  "seed_data_creation": "Two transient rooms created ('UI_Ticket_Test', 'UI_Ticket_Test2') plus several TEST_ rooms via pytest fixtures; each auto-seeds default menu.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Push cannot be end-to-end verified in preview (placeholder key -> upstream 401 -> our 500). Backend base URL from EXPO_PUBLIC_BACKEND_URL. Tests: /app/backend/tests/backend_test.py (19 tests, ~4s). UI seeding: localStorage 'servesync.role' + 'servesync.code' as JSON strings then navigate to /tablet or /waiter. Note: /tablet Orders board loads with active_only=true so served orders only appear via order_updated WebSocket events after the page is already open.",
+  "rca_of_issue": "N/A - no bugs found."
+}

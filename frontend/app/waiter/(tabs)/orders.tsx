@@ -9,6 +9,8 @@ import { session } from "@/src/lib/session";
 import { useRoomSocket } from "@/src/lib/useRoomSocket";
 import { SettingsSheet } from "@/src/components/SettingsSheet";
 import { OrderEditor } from "@/src/components/OrderEditor";
+import { KitchenTicket } from "@/src/components/KitchenTicket";
+import { BillSplitter } from "@/src/components/BillSplitter";
 import { useToast } from "@/src/components/Toast";
 
 export default function WaiterOrders() {
@@ -19,6 +21,8 @@ export default function WaiterOrders() {
   const [refreshing, setRefreshing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [editing, setEditing] = useState<Order | null>(null);
+  const [ticket, setTicket] = useState<Order | null>(null);
+  const [splitting, setSplitting] = useState<Order | null>(null);
 
   const toast = useToast();
   const statusMap = useRef<Record<string, string>>({});
@@ -103,7 +107,7 @@ export default function WaiterOrders() {
         key={o.id}
         testID={`waiter-order-card-${o.id}`}
         onPress={() => canEdit && setEditing(o)}
-        style={[styles.card, isPast && { opacity: 0.7 }]}
+        style={[styles.card, isPast && { opacity: 0.85 }]}
       >
         <View style={styles.cardTop}>
           <Text style={styles.tableTag}>Table {o.table_number}</Text>
@@ -120,16 +124,38 @@ export default function WaiterOrders() {
             </View>
           ))}
         </View>
+        <View style={styles.actionsRow}>
+          <Pressable
+            testID={`waiter-ticket-${o.id}`}
+            onPress={() => setTicket(o)}
+            style={styles.smallBtn}
+          >
+            <Feather name="printer" size={14} color={theme.color.brand} />
+            <Text style={styles.smallBtnText}>Ticket</Text>
+          </Pressable>
+          <Pressable
+            testID={`waiter-split-${o.id}`}
+            onPress={() => setSplitting(o)}
+            style={styles.smallBtn}
+          >
+            <Feather name="divide" size={14} color={theme.color.brand} />
+            <Text style={styles.smallBtnText}>Split bill</Text>
+          </Pressable>
+          {canEdit ? (
+            <Pressable
+              testID={`waiter-edit-${o.id}`}
+              onPress={() => setEditing(o)}
+              style={styles.smallBtn}
+            >
+              <Feather name="edit-2" size={14} color={theme.color.brand} />
+              <Text style={styles.smallBtnText}>Edit</Text>
+            </Pressable>
+          ) : null}
+        </View>
         <View style={styles.cardBottom}>
           <Text style={styles.time}>
             {new Date(o.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
           </Text>
-          {canEdit ? (
-            <View style={styles.editHint}>
-              <Feather name="edit-2" size={12} color={theme.color.brand} />
-              <Text style={styles.editHintText}>Tap to edit</Text>
-            </View>
-          ) : null}
           <Text style={styles.total}>${o.total.toFixed(2)}</Text>
         </View>
       </Pressable>
@@ -196,6 +222,17 @@ export default function WaiterOrders() {
         order={editing}
         onSaved={(o) => setOrders((prev) => prev.map((x) => (x.id === o.id ? o : x)))}
       />
+      <KitchenTicket
+        visible={!!ticket}
+        onClose={() => setTicket(null)}
+        code={code || ""}
+        order={ticket}
+      />
+      <BillSplitter
+        visible={!!splitting}
+        onClose={() => setSplitting(null)}
+        order={splitting}
+      />
     </SafeAreaView>
   );
 }
@@ -251,6 +288,22 @@ const styles = StyleSheet.create({
   editHint: { flexDirection: "row", alignItems: "center", gap: 4, flex: 1, justifyContent: "center" },
   editHintText: { color: theme.color.brand, fontSize: theme.font.sm, fontWeight: "600" },
   total: { color: theme.color.brand, fontWeight: "800", fontSize: theme.font.lg },
+  actionsRow: {
+    flexDirection: "row",
+    gap: theme.space.sm,
+    marginTop: theme.space.md,
+    flexWrap: "wrap",
+  },
+  smallBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: theme.space.md,
+    paddingVertical: 6,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.color.brandTint,
+  },
+  smallBtnText: { color: theme.color.brand, fontWeight: "700", fontSize: theme.font.sm },
   empty: { alignItems: "center", padding: theme.space.xxxl, gap: theme.space.md },
   emptyText: { color: theme.color.onSurfaceMuted, textAlign: "center" },
 });

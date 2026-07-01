@@ -174,6 +174,44 @@ def test_invalid_status(s, room, order):
     assert r.status_code == 400
 
 
+# ---------- Push relay (iteration 2) ----------
+def test_register_push_relay_placeholder_key(s):
+    """With placeholder EMERGENT_PUSH_KEY the relay must reply with an
+    informative 5xx (not crash). Any 2xx or 5xx is acceptable."""
+    r = s.post(
+        f"{API}/register-push",
+        json={"user_id": "TEST_pushuser", "platform": "ios", "device_token": "TEST_devicetoken_xyz"},
+    )
+    assert r.status_code in (201, 500, 502), r.text
+    # Must return JSON (informative error), not crash
+    try:
+        r.json()
+    except Exception:
+        pytest.fail(f"Non-JSON response: {r.text!r}")
+
+
+def test_status_ready_served_non_blocking_push(s, room):
+    """Even when the push relay is not available (placeholder key), status
+    transitions to ready and served MUST still succeed (200)."""
+    # Fresh order for this test to avoid interaction with test_order_status_flow
+    items = s.get(f"{API}/rooms/{room['code']}/items").json()
+    r = s.post(
+        f"{API}/rooms/{room['code']}/orders",
+        json={
+            "table_number": "P1",
+            "waiter_name": "TEST_push_waiter",
+            "lines": [{"item_id": items[0]["id"], "quantity": 1}],
+        },
+    )
+    assert r.status_code == 200, r.text
+    oid = r.json()["id"]
+
+    for status in ("ready", "served"):
+        r = s.put(f"{API}/rooms/{room['code']}/orders/{oid}/status", json={"status": status})
+        assert r.status_code == 200, f"{status} -> {r.status_code} {r.text}"
+        assert r.json()["status"] == status
+
+
 def test_create_order_empty_items_400(s, room):
     r = s.post(
         f"{API}/rooms/{room['code']}/orders",

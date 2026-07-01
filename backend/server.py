@@ -6,6 +6,7 @@ import os
 import logging
 import random
 import string
+import httpx
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
@@ -139,6 +140,67 @@ class OrderUpdatePayload(BaseModel):
     table_number: Optional[str] = None
     notes: Optional[str] = None
     lines: Optional[List[OrderLineIn]] = None
+
+
+# -------------------- Push Notifications (Emergent-managed) --------------------
+
+PUSH_BASE_URL = "https://integrations.emergentagent.com"
+PUSH_KEY = os.environ.get("EMERGENT_PUSH_KEY", "placeholder")
+
+_push_client = httpx.AsyncClient(
+    base_url=PUSH_BASE_URL,
+    headers={"X-Push-Key": PUSH_KEY},
+    timeout=10.0,
+)
+
+
+class RegisterPushBody(BaseModel):
+    user_id: str
+    platform: str
+    device_token: str
+
+
+@api_router.post("/register-push", status_code=201)
+async def register_push(body: RegisterPushBody):
+    try:
+        resp = await _push_client.post("/api/v1/push/users/register", json=body.model_dump())
+        if resp.status_code == 401:
+            raise HTTPException(500, "EMERGENT_PUSH_KEY missing or invalid")
+        if resp.status_code >= 500:
+            raise HTTPException(502, "Push provider unavailable")
+        resp.raise_for_status()
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Non-fatal — user id remembered client-side, notifications simply won't fire
+        logging.getLogger(__name__).warning("register-push failed: %s", e)
+        raise HTTPException(502, "Push provider unavailable")
+    return {"status": "registered"}
+
+
+async def send_push(
+    recipients: List[str],
+    data: Dict[str, Any],
+    idempotency_key: Optional[str] = None,
+) -> None:
+    if not recipients:
+        return
+    if "title" not in data or "message" not in data:
+        raise ValueError("data must include title and message")
+    payload: Dict[str, Any] = {"recipients": recipients[:100], "data": data}
+    if idempotency_key:
+        payload["$idempotency_key"] = idempotency_key
+    resp = await _push_client.post("/api/v1/push/trigger", json=payload)
+    if resp.status_code == 401:
+        raise HTTPException(500, "EMERGENT_PUSH_KEY missing or invalid")
+    if resp.status_code >= 500:
+        raise HTTPException(502, "Push provider unavailable")
+    resp.raise_for_status()
+
+
+def push_user_id(room_code: str, waiter_name: str) -> str:
+    """Stable user id used for push registration (per waiter, per restaurant)."""
+    return f"{room_code}:{waiter_name.strip().lower()}"
 
 
 # -------------------- WebSocket manager --------------------
@@ -490,6 +552,28 @@ async def update_order_status(code: str, order_id: str, payload: OrderStatusUpda
     o = await db.orders.find_one({"room_code": code, "id": order_id})
     order_out = clean(o)
     await manager.broadcast(code, {"event": "order_updated", "order": order_out})
+
+    # Push notification to the waiter for ready/served transitions
+    if payload.status in ("ready", "served"):
+        try:
+            title = (
+                f"Table {order_out['table_number']} · Ready for pickup"
+                if payload.status == "ready"
+                else f"Table {order_out['table_number']} · Order finished"
+            )
+            message = (
+                "The kitchen has your order ready to serve."
+                if payload.status == "ready"
+                else "The kitchen has marked your order as served."
+            )
+            await send_push(
+                recipients=[push_user_id(code, order_out["waiter_name"])],
+                data={"title": title, "message": message, "action_url": "/waiter/orders"},
+                idempotency_key=f"{order_out['id']}-{payload.status}",
+            )
+        except Exception as e:
+            logging.getLogger(__name__).warning("push failed (non-blocking): %s", e)
+
     return Order(**order_out)
 
 
