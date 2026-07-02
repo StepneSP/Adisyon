@@ -4,7 +4,7 @@ import { Feather } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { theme, statusMeta } from "@/src/lib/theme";
-import { api, type Order } from "@/src/lib/api";
+import { api, orderApi, type Order } from "@/src/lib/api";
 import { session } from "@/src/lib/session";
 import { useRoomSocket } from "@/src/lib/useRoomSocket";
 import { SettingsSheet } from "@/src/components/SettingsSheet";
@@ -13,7 +13,8 @@ import { KitchenTicket } from "@/src/components/KitchenTicket";
 import { BillSplitter } from "@/src/components/BillSplitter";
 import { useToast } from "@/src/components/Toast";
 export default function WaiterOrders() {
-  const [code, setCode] = useState<string | null>(null);
+  const [restoranId, setRestoranId] = useState<string | null>(null);
+  const [restaurantCode, setRestaurantCode] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,20 +28,22 @@ export default function WaiterOrders() {
   const toast = useToast();
   const statusMap = useRef<Record<string, string>>({});
 
-  const load = useCallback(async (c: string) => {
-    const list = await api.listOrders(c, false);
+  const load = useCallback(async (rid: string) => {
+    const list = await orderApi.list(rid, false);
     setOrders(list);
     statusMap.current = Object.fromEntries(list.map((o) => [o.id, o.status]));
   }, []);
 
   useEffect(() => {
     (async () => {
-      const c = await session.getCode();
+      const rid = await session.getRestoranId();
+      const code = await session.getCode();
       const n = await session.getWaiterName();
-      if (!c) return;
-      setCode(c);
+      if (!rid) return;
+      setRestoranId(rid);
+      setRestaurantCode(code || "");
       setName(n || "");
-      await load(c);
+      await load(rid);
       setLoading(false);
     })();
   }, [load]);
@@ -73,11 +76,11 @@ export default function WaiterOrders() {
 
   const markServed = useCallback(
     async (o: Order) => {
-      if (!code) return;
+      if (!restoranId) return;
       setServingId(o.id);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
       try {
-        const updated = await api.updateOrderStatus(code, o.id, "served");
+        const updated = await orderApi.updateStatus(restoranId, o.id, "served");
         setOrders((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
         toast.show({ kind: "success", title: `Table ${o.table_number} · Served`, message: "Nice work." });
       } catch (e: any) {
@@ -86,15 +89,15 @@ export default function WaiterOrders() {
         setServingId(null);
       }
     },
-    [code, toast],
+    [restoranId, toast],
   );
 
-  useRoomSocket(code, onMessage);
+  useRoomSocket(restaurantCode || "", onMessage);
 
   const onRefresh = async () => {
-    if (!code) return;
+    if (!restoranId) return;
     setRefreshing(true);
-    await load(code);
+    await load(restoranId);
     setRefreshing(false);
   };
 
@@ -247,14 +250,14 @@ export default function WaiterOrders() {
       <OrderEditor
         visible={!!editing}
         onClose={() => setEditing(null)}
-        code={code || ""}
+        restoranId={restoranId || ""}
         order={editing}
         onSaved={(o) => setOrders((prev) => prev.map((x) => (x.id === o.id ? o : x)))}
       />
       <KitchenTicket
         visible={!!ticket}
         onClose={() => setTicket(null)}
-        code={code || ""}
+        restoranId={restoranId || ""}
         order={ticket}
       />
       <BillSplitter

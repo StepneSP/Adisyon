@@ -19,7 +19,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import * as Haptics from "expo-haptics";
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
 import { theme } from "@/src/lib/theme";
-import { api, type Category, type MenuItem } from "@/src/lib/api";
+import { api, categoryApi, menuItemApi, orderApi, type Category, type MenuItem } from "@/src/lib/api";
 import { session } from "@/src/lib/session";
 import { SettingsSheet } from "@/src/components/SettingsSheet";
 
@@ -28,7 +28,7 @@ type CartLine = { item: MenuItem; qty: number };
 export default function WaiterMenu() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [code, setCode] = useState<string | null>(null);
+  const [restoranId, setRestoranId] = useState<string | null>(null);
   const [waiterName, setWaiterName] = useState("");
   const [cats, setCats] = useState<Category[]>([]);
   const [items, setItems] = useState<MenuItem[]>([]);
@@ -45,23 +45,50 @@ export default function WaiterMenu() {
 
   useEffect(() => {
     (async () => {
-      const c = await session.getCode();
+      const rid = await session.getRestoranId();
       const n = await session.getWaiterName();
-      if (!c || !n) {
+      console.log("🔵 Menu screen - restoranId:", rid, "waiterName:", n);
+      
+      if (!rid || !n) {
+        console.log("❌ No restoranId or waiterName, redirecting to pair");
         router.replace("/waiter/pair");
         return;
       }
-      setCode(c);
+      setRestoranId(rid);
       setWaiterName(n);
+      
       try {
-        const [cs, is] = await Promise.all([api.listCategories(c), api.listItems(c)]);
+        console.log("🔵 Fetching categories and items for:", rid);
+        console.log("🔵 Category API URL:", `/restaurants/${rid}/categories`);
+        console.log("🔵 Menu Item API URL:", `/restaurants/${rid}/items`);
+        
+        // Add timeout to detect hanging requests
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("Request timeout after 10s")), 10000)
+        );
+        
+        console.log("🔵 Starting parallel requests...");
+        const [cs, is] = await Promise.race([
+          Promise.all([
+            categoryApi.list(rid),
+            menuItemApi.list(rid)
+          ]),
+          timeoutPromise
+        ]);
+        
+        console.log("✅ Categories:", cs.length, "Items:", is.length);
         setCats(cs);
         setItems(is);
         setSelectedCat(cs[0]?.id || null);
-      } catch {
-        Alert.alert("Connection error", "Could not load menu. Check pairing.");
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : "Unknown error";
+        console.error("❌ Failed to load menu:", errorMessage);
+        console.error("❌ Error stack:", err instanceof Error ? err.stack : "No stack");
+        Alert.alert("Connection error", `Could not load menu: ${errorMessage}`);
+      } finally {
+        console.log("✅ Setting loading to false");
+        setLoading(false);
       }
-      setLoading(false);
     })();
   }, [router]);
 
@@ -104,14 +131,14 @@ export default function WaiterMenu() {
   };
 
   const submitOrder = async () => {
-    if (!code || cartCount === 0) return;
+    if (!restoranId || cartCount === 0) return;
     if (!table.trim()) {
       setShowTableModal(true);
       return;
     }
     setSubmitting(true);
     try {
-      await api.createOrder(code, {
+      await orderApi.create(restoranId, {
         table_number: table.trim(),
         waiter_name: waiterName,
         lines: Object.values(cart).map((l) => ({ item_id: l.item.id, quantity: l.qty })),
@@ -133,7 +160,41 @@ export default function WaiterMenu() {
   if (loading) {
     return (
       <SafeAreaView style={styles.loading}>
-        <ActivityIndicator color={theme.color.brand} />
+        <ActivityIndicator color={theme.color.brand} size="large" />
+      </SafeAreaView>
+    );
+  }
+  
+  // Show empty state if no categories
+  if (cats.length === 0) {
+    return (
+      <SafeAreaView style={styles.container} edges={["top"]}>
+        <View style={styles.header}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.greeting}>Hi {waiterName.split(" ")[0]}</Text>
+            <Pressable testID="table-selector" onPress={() => setShowTableModal(true)} style={styles.tablePick}>
+              <Feather name="grid" size={14} color={theme.color.brand} />
+              <Text style={styles.tablePickText}>
+                {table ? `Table ${table}` : "Choose table"}
+              </Text>
+              <Feather name="chevron-down" size={14} color={theme.color.brand} />
+            </Pressable>
+          </View>
+          <Pressable
+            testID="waiter-settings-button"
+            onPress={() => setShowSettings(true)}
+            style={styles.iconBtn}
+          >
+            <Feather name="settings" size={18} color={theme.color.onSurfaceMuted} />
+          </Pressable>
+        </View>
+        <View style={styles.emptyContainer}>
+          <Feather name="coffee" size={64} color={theme.color.borderStrong} />
+          <Text style={styles.emptyTitle}>Henüz menü eklenmemiş</Text>
+          <Text style={styles.emptyText}>
+            Restoran yöneticisi menüyü yönetim panelinden eklemelidir.
+          </Text>
+        </View>
       </SafeAreaView>
     );
   }
@@ -425,6 +486,19 @@ const styles = StyleSheet.create({
 
   empty: { alignItems: "center", padding: theme.space.xxxl, gap: theme.space.md },
   emptyText: { color: theme.color.onSurfaceMuted },
+  emptyContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: theme.space.xxxl,
+    gap: theme.space.md,
+  },
+  emptyTitle: {
+    fontSize: theme.font.xl,
+    fontWeight: "700",
+    color: theme.color.onSurface,
+    textAlign: "center",
+  },
 
   cartBar: {
     position: "absolute", left: 16, right: 16,

@@ -1,28 +1,28 @@
-from fastapi import FastAPI, APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from dotenv import load_dotenv
+from fastapi import FastAPI, APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
-import os
 import logging
 import random
 import string
 import httpx
-from pathlib import Path
+import os
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime, timezone, timedelta
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 
-
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
-
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+# Import database configuration (avoids circular imports)
+from backend.database import db, get_db, SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, client
 
 app = FastAPI(title="ServeSync API")
 api_router = APIRouter(prefix="/api")
+
+# Import and include admin routes
+from backend.admin_routes import admin_router
+app.include_router(admin_router)
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 # -------------------- Utility --------------------
@@ -35,6 +35,11 @@ def gen_pairing_code() -> str:
     return "".join(random.choices(string.digits, k=4))
 
 
+def gen_daily_code() -> str:
+    """Generate 4-digit daily code for restaurant."""
+    return "".join(random.choices(string.digits, k=4))
+
+
 def clean(doc: dict) -> dict:
     """Strip Mongo _id from a document."""
     if doc is None:
@@ -44,22 +49,73 @@ def clean(doc: dict) -> dict:
     return d
 
 
-# -------------------- Models --------------------
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    """Create JWT access token."""
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
 
-class RoomCreate(BaseModel):
+
+# -------------------- Multi-Tenant Models --------------------
+
+class RestaurantCreate(BaseModel):
     name: str = Field(default="My Restaurant")
+    # Optional: owner info for SaaS admin
+    owner_email: Optional[str] = None
+    owner_phone: Optional[str] = None
 
 
-class RoomUpdate(BaseModel):
-    name: str
+class RestaurantUpdate(BaseModel):
+    name: Optional[str] = None
+    abonelik_durumu: Optional[str] = None  # aktif | pasif
+    gunluk_kod: Optional[str] = None
 
 
-class Room(BaseModel):
+class Restaurant(BaseModel):
     id: str
-    code: str
     name: str
+    code: str  # 4-digit pairing code (for initial setup)
+    gunluk_kod: str  # Daily changing 4-digit code
+    abonelik_durumu: str = "aktif"  # aktif | pasif
+    owner_email: Optional[str] = None
+    owner_phone: Optional[str] = None
     created_at: str
+    updated_at: str
 
+
+class WaiterLogin(BaseModel):
+    nickname: str
+    gunluk_kod: str  # Daily code from restaurant
+
+
+class WaiterSessionCreate(BaseModel):
+    nickname: str
+    restoran_id: str
+
+
+class WaiterSession(BaseModel):
+    id: str
+    restoran_id: str
+    nickname: str
+    session_token: str  # JWT token
+    olusturulma_tarihi: str
+    son_aktivite: str
+
+
+class WaiterSessionResponse(BaseModel):
+    session_token: str
+    nickname: str
+    restoran_id: str
+    restoran_adi: str
+    gunluk_kod: str
+
+
+# -------------------- Updated Existing Models --------------------
 
 class CategoryCreate(BaseModel):
     name: str
@@ -67,7 +123,7 @@ class CategoryCreate(BaseModel):
 
 class Category(BaseModel):
     id: str
-    room_code: str
+    restoran_id: str
     name: str
     sort: int = 0
 
@@ -90,7 +146,7 @@ class MenuItemUpdate(BaseModel):
 
 class MenuItem(BaseModel):
     id: str
-    room_code: str
+    restoran_id: str
     name: str
     price: float
     category_id: str
@@ -121,7 +177,7 @@ class OrderLine(BaseModel):
 
 class Order(BaseModel):
     id: str
-    room_code: str
+    restoran_id: str
     table_number: str
     waiter_name: str
     lines: List[OrderLine]
@@ -172,7 +228,6 @@ async def register_push(body: RegisterPushBody):
     except HTTPException:
         raise
     except Exception as e:
-        # Non-fatal — user id remembered client-side, notifications simply won't fire
         logging.getLogger(__name__).warning("register-push failed: %s", e)
         raise HTTPException(502, "Push provider unavailable")
     return {"status": "registered"}
@@ -198,9 +253,9 @@ async def send_push(
     resp.raise_for_status()
 
 
-def push_user_id(room_code: str, waiter_name: str) -> str:
+def push_user_id(restoran_id: str, waiter_name: str) -> str:
     """Stable user id used for push registration (per waiter, per restaurant)."""
-    return f"{room_code}:{waiter_name.strip().lower()}"
+    return f"{restoran_id}:{waiter_name.strip().lower()}"
 
 
 # -------------------- WebSocket manager --------------------
@@ -262,12 +317,12 @@ DEFAULT_MENU = [
 ]
 
 
-async def seed_menu(room_code: str) -> None:
+async def seed_menu(restoran_id: str) -> None:
     sort = 0
     for cat_name, items in DEFAULT_MENU:
         cat = {
             "id": str(uuid.uuid4()),
-            "room_code": room_code,
+            "restoran_id": restoran_id,
             "name": cat_name,
             "sort": sort,
         }
@@ -276,7 +331,7 @@ async def seed_menu(room_code: str) -> None:
         for name, price, desc in items:
             it = {
                 "id": str(uuid.uuid4()),
-                "room_code": room_code,
+                "restoran_id": restoran_id,
                 "name": name,
                 "price": price,
                 "category_id": cat["id"],
@@ -286,87 +341,201 @@ async def seed_menu(room_code: str) -> None:
             await db.items.insert_one(it)
 
 
-# -------------------- Room routes --------------------
+# -------------------- Auth Dependencies --------------------
+
+async def get_current_waiter(token: str) -> dict:
+    """Verify JWT token and return waiter session."""
+    credentials_exception = HTTPException(
+        status_code=401,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        session_id: str = payload.get("sub")
+        if session_id is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    
+    session = await db.waiter_sessions.find_one({"id": session_id})
+    if session is None:
+        raise credentials_exception
+    
+    # Update last activity
+    await db.waiter_sessions.update_one(
+        {"id": session_id},
+        {"$set": {"son_aktivite": now_iso()}}
+    )
+    
+    return session
+
+
+# -------------------- Restaurant (Tenant) Routes --------------------
 
 @api_router.get("/")
 async def root():
     return {"message": "ServeSync API", "ok": True}
 
 
-@api_router.post("/rooms", response_model=Room)
-async def create_room(payload: RoomCreate):
-    # Generate a unique 4-digit code
+@api_router.post("/restaurants", response_model=Restaurant)
+async def create_restaurant(payload: RestaurantCreate):
+    """Create a new restaurant (tenant)."""
+    # Generate unique 4-digit code for initial setup
     for _ in range(30):
         code = gen_pairing_code()
-        existing = await db.rooms.find_one({"code": code})
+        existing = await db.restaurants.find_one({"code": code})
         if not existing:
             break
     else:
         raise HTTPException(status_code=500, detail="Could not allocate code")
 
-    room = {
+    # Generate daily code
+    gunluk_kod = gen_daily_code()
+    
+    now = now_iso()
+    restaurant = {
         "id": str(uuid.uuid4()),
         "code": code,
         "name": payload.name or "My Restaurant",
-        "created_at": now_iso(),
+        "gunluk_kod": gunluk_kod,
+        "abonelik_durumu": "aktif",
+        "owner_email": payload.owner_email,
+        "owner_phone": payload.owner_phone,
+        "created_at": now,
+        "updated_at": now,
     }
-    await db.rooms.insert_one(room)
-    await seed_menu(code)
-    return Room(**clean(room))
+    await db.restaurants.insert_one(restaurant)
+    await seed_menu(restaurant["id"])
+    return Restaurant(**clean(restaurant))
 
 
-@api_router.get("/rooms/{code}", response_model=Room)
-async def get_room(code: str):
-    room = await db.rooms.find_one({"code": code})
-    if not room:
-        raise HTTPException(status_code=404, detail="Room not found")
-    return Room(**clean(room))
+@api_router.get("/restaurants/{restoran_id}", response_model=Restaurant)
+async def get_restaurant(restoran_id: str):
+    restaurant = await db.restaurants.find_one({"id": restoran_id})
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant not found")
+    return Restaurant(**clean(restaurant))
 
 
-@api_router.put("/rooms/{code}", response_model=Room)
-async def update_room(code: str, payload: RoomUpdate):
-    name = (payload.name or "").strip() or "My Restaurant"
-    result = await db.rooms.update_one({"code": code}, {"$set": {"name": name}})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Room not found")
-    room = await db.rooms.find_one({"code": code})
-    return Room(**clean(room))
+@api_router.put("/restaurants/{restoran_id}", response_model=Restaurant)
+async def update_restaurant(restoran_id: str, payload: RestaurantUpdate):
+    restaurant = await db.restaurants.find_one({"id": restoran_id})
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant not found")
+    
+    update_data = {}
+    if payload.name is not None:
+        update_data["name"] = payload.name.strip() or "My Restaurant"
+    if payload.abonelik_durumu is not None:
+        update_data["abonelik_durumu"] = payload.abonelik_durumu
+    if payload.gunluk_kod is not None:
+        update_data["gunluk_kod"] = payload.gunluk_kod
+    
+    update_data["updated_at"] = now_iso()
+    
+    await db.restaurants.update_one({"id": restoran_id}, {"$set": update_data})
+    updated = await db.restaurants.find_one({"id": restoran_id})
+    return Restaurant(**clean(updated))
 
 
-@api_router.post("/rooms/{code}/regenerate", response_model=Room)
-async def regenerate_code(code: str):
-    room = await db.rooms.find_one({"code": code})
-    if not room:
-        raise HTTPException(status_code=404, detail="Room not found")
-    for _ in range(30):
-        new_code = gen_pairing_code()
-        if not await db.rooms.find_one({"code": new_code}):
-            break
-    else:
-        raise HTTPException(status_code=500, detail="Could not allocate code")
-    # Update all related docs
-    await db.rooms.update_one({"code": code}, {"$set": {"code": new_code}})
-    await db.categories.update_many({"room_code": code}, {"$set": {"room_code": new_code}})
-    await db.items.update_many({"room_code": code}, {"$set": {"room_code": new_code}})
-    await db.orders.update_many({"room_code": code}, {"$set": {"room_code": new_code}})
-    updated = await db.rooms.find_one({"code": new_code})
-    return Room(**clean(updated))
+@api_router.post("/restaurants/{restoran_id}/regenerate-daily-code", response_model=Restaurant)
+async def regenerate_daily_code(restoran_id: str):
+    """Regenerate the daily code (called daily by cron job or admin)."""
+    restaurant = await db.restaurants.find_one({"id": restoran_id})
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant not found")
+    
+    new_code = gen_daily_code()
+    await db.restaurants.update_one(
+        {"id": restoran_id},
+        {"$set": {"gunluk_kod": new_code, "updated_at": now_iso()}}
+    )
+    updated = await db.restaurants.find_one({"id": restoran_id})
+    return Restaurant(**clean(updated))
+
+
+# -------------------- Waiter Authentication Routes --------------------
+
+@api_router.post("/auth/waiter/login", response_model=WaiterSessionResponse)
+async def waiter_login(payload: WaiterLogin):
+    """
+    Waiter login with nickname + daily code.
+    No password required - just nickname and the restaurant's daily code.
+    """
+    # Find restaurant by daily code
+    restaurant = await db.restaurants.find_one({"gunluk_kod": payload.gunluk_kod})
+    if not restaurant:
+        raise HTTPException(status_code=401, detail="Invalid daily code")
+    
+    if restaurant.get("abonelik_durumu") != "aktif":
+        raise HTTPException(status_code=403, detail="Restaurant subscription is inactive")
+    
+    # Create session
+    session_id = str(uuid.uuid4())
+    now = now_iso()
+    expires_delta = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    
+    session_token = create_access_token(
+        data={"sub": session_id, "nickname": payload.nickname, "restoran_id": restaurant["id"]},
+        expires_delta=expires_delta
+    )
+    
+    session = {
+        "id": session_id,
+        "restoran_id": restaurant["id"],
+        "nickname": payload.nickname.strip(),
+        "session_token": session_token,
+        "olusturulma_tarihi": now,
+        "son_aktivite": now,
+    }
+    await db.waiter_sessions.insert_one(session)
+    
+    return WaiterSessionResponse(
+        session_token=session_token,
+        nickname=payload.nickname,
+        restoran_id=restaurant["id"],
+        restoran_adi=restaurant["name"],
+        gunluk_kod=restaurant["gunluk_kod"],
+    )
+
+
+@api_router.post("/auth/waiter/logout")
+async def waiter_logout(current_session: dict = Depends(get_current_waiter)):
+    """Logout waiter by deleting session."""
+    await db.waiter_sessions.delete_one({"id": current_session["id"]})
+    return {"message": "Logged out successfully"}
+
+
+@api_router.get("/auth/waiter/me")
+async def get_current_waiter_info(current_session: dict = Depends(get_current_waiter)):
+    """Get current waiter info."""
+    restaurant = await db.restaurants.find_one({"id": current_session["restoran_id"]})
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant not found")
+    
+    return {
+        "nickname": current_session["nickname"],
+        "restoran_id": current_session["restoran_id"],
+        "restoran_adi": restaurant["name"],
+        "gunluk_kod": restaurant["gunluk_kod"],
+    }
 
 
 # -------------------- Categories --------------------
 
-@api_router.get("/rooms/{code}/categories", response_model=List[Category])
-async def list_categories(code: str):
-    cats = await db.categories.find({"room_code": code}).sort("sort", 1).to_list(500)
+@api_router.get("/restaurants/{restoran_id}/categories", response_model=List[Category])
+async def list_categories(restoran_id: str):
+    cats = await db.categories.find({"restoran_id": restoran_id}).sort("sort", 1).to_list(500)
     return [Category(**clean(c)) for c in cats]
 
 
-@api_router.post("/rooms/{code}/categories", response_model=Category)
-async def add_category(code: str, payload: CategoryCreate):
-    count = await db.categories.count_documents({"room_code": code})
+@api_router.post("/restaurants/{restoran_id}/categories", response_model=Category)
+async def add_category(restoran_id: str, payload: CategoryCreate):
+    count = await db.categories.count_documents({"restoran_id": restoran_id})
     cat = {
         "id": str(uuid.uuid4()),
-        "room_code": code,
+        "restoran_id": restoran_id,
         "name": payload.name,
         "sort": count,
     }
@@ -374,38 +543,38 @@ async def add_category(code: str, payload: CategoryCreate):
     return Category(**clean(cat))
 
 
-@api_router.put("/rooms/{code}/categories/{cat_id}", response_model=Category)
-async def update_category(code: str, cat_id: str, payload: CategoryCreate):
+@api_router.put("/restaurants/{restoran_id}/categories/{cat_id}", response_model=Category)
+async def update_category(restoran_id: str, cat_id: str, payload: CategoryCreate):
     result = await db.categories.update_one(
-        {"room_code": code, "id": cat_id},
+        {"restoran_id": restoran_id, "id": cat_id},
         {"$set": {"name": payload.name}},
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Category not found")
-    cat = await db.categories.find_one({"room_code": code, "id": cat_id})
+    cat = await db.categories.find_one({"restoran_id": restoran_id, "id": cat_id})
     return Category(**clean(cat))
 
 
-@api_router.delete("/rooms/{code}/categories/{cat_id}")
-async def delete_category(code: str, cat_id: str):
-    await db.categories.delete_one({"room_code": code, "id": cat_id})
-    await db.items.delete_many({"room_code": code, "category_id": cat_id})
+@api_router.delete("/restaurants/{restoran_id}/categories/{cat_id}")
+async def delete_category(restoran_id: str, cat_id: str):
+    await db.categories.delete_one({"restoran_id": restoran_id, "id": cat_id})
+    await db.items.delete_many({"restoran_id": restoran_id, "category_id": cat_id})
     return {"ok": True}
 
 
 # -------------------- Menu items --------------------
 
-@api_router.get("/rooms/{code}/items", response_model=List[MenuItem])
-async def list_items(code: str):
-    items = await db.items.find({"room_code": code}).to_list(2000)
+@api_router.get("/restaurants/{restoran_id}/items", response_model=List[MenuItem])
+async def list_items(restoran_id: str):
+    items = await db.items.find({"restoran_id": restoran_id}).to_list(2000)
     return [MenuItem(**clean(i)) for i in items]
 
 
-@api_router.post("/rooms/{code}/items", response_model=MenuItem)
-async def add_item(code: str, payload: MenuItemCreate):
+@api_router.post("/restaurants/{restoran_id}/items", response_model=MenuItem)
+async def add_item(restoran_id: str, payload: MenuItemCreate):
     it = {
         "id": str(uuid.uuid4()),
-        "room_code": code,
+        "restoran_id": restoran_id,
         "name": payload.name,
         "price": float(payload.price),
         "category_id": payload.category_id,
@@ -416,49 +585,49 @@ async def add_item(code: str, payload: MenuItemCreate):
     return MenuItem(**clean(it))
 
 
-@api_router.put("/rooms/{code}/items/{item_id}", response_model=MenuItem)
-async def update_item(code: str, item_id: str, payload: MenuItemUpdate):
+@api_router.put("/restaurants/{restoran_id}/items/{item_id}", response_model=MenuItem)
+async def update_item(restoran_id: str, item_id: str, payload: MenuItemUpdate):
     update = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not update:
         raise HTTPException(status_code=400, detail="Nothing to update")
     result = await db.items.update_one(
-        {"room_code": code, "id": item_id},
+        {"restoran_id": restoran_id, "id": item_id},
         {"$set": update},
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Item not found")
-    it = await db.items.find_one({"room_code": code, "id": item_id})
+    it = await db.items.find_one({"restoran_id": restoran_id, "id": item_id})
     return MenuItem(**clean(it))
 
 
-@api_router.delete("/rooms/{code}/items/{item_id}")
-async def delete_item(code: str, item_id: str):
-    await db.items.delete_one({"room_code": code, "id": item_id})
+@api_router.delete("/restaurants/{restoran_id}/items/{item_id}")
+async def delete_item(restoran_id: str, item_id: str):
+    await db.items.delete_one({"restoran_id": restoran_id, "id": item_id})
     return {"ok": True}
 
 
 # -------------------- Orders --------------------
 
-@api_router.get("/rooms/{code}/orders", response_model=List[Order])
-async def list_orders(code: str, active_only: bool = False):
-    q: Dict[str, Any] = {"room_code": code}
+@api_router.get("/restaurants/{restoran_id}/orders", response_model=List[Order])
+async def list_orders(restoran_id: str, active_only: bool = False):
+    q: Dict[str, Any] = {"restoran_id": restoran_id}
     if active_only:
         q["status"] = {"$in": ["new", "preparing", "ready"]}
     orders = await db.orders.find(q).sort("created_at", -1).to_list(1000)
     return [Order(**clean(o)) for o in orders]
 
 
-@api_router.post("/rooms/{code}/orders", response_model=Order)
-async def create_order(code: str, payload: OrderCreate):
-    room = await db.rooms.find_one({"code": code})
-    if not room:
-        raise HTTPException(status_code=404, detail="Room not found")
+@api_router.post("/restaurants/{restoran_id}/orders", response_model=Order)
+async def create_order(restoran_id: str, payload: OrderCreate):
+    restaurant = await db.restaurants.find_one({"id": restoran_id})
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant not found")
 
     # Build lines with current prices
     lines: List[dict] = []
     total = 0.0
     for line_in in payload.lines:
-        item = await db.items.find_one({"room_code": code, "id": line_in.item_id})
+        item = await db.items.find_one({"restoran_id": restoran_id, "id": line_in.item_id})
         if not item:
             continue
         qty = max(1, int(line_in.quantity))
@@ -478,7 +647,7 @@ async def create_order(code: str, payload: OrderCreate):
     now = now_iso()
     order = {
         "id": str(uuid.uuid4()),
-        "room_code": code,
+        "restoran_id": restoran_id,
         "table_number": payload.table_number,
         "waiter_name": payload.waiter_name,
         "lines": lines,
@@ -490,13 +659,15 @@ async def create_order(code: str, payload: OrderCreate):
     }
     await db.orders.insert_one(order)
     order_out = clean(order)
-    await manager.broadcast(code, {"event": "order_created", "order": order_out})
+    
+    # Broadcast using restaurant code
+    await manager.broadcast(restaurant["code"], {"event": "order_created", "order": order_out})
     return Order(**order_out)
 
 
-@api_router.put("/rooms/{code}/orders/{order_id}", response_model=Order)
-async def edit_order(code: str, order_id: str, payload: OrderUpdatePayload):
-    existing = await db.orders.find_one({"room_code": code, "id": order_id})
+@api_router.put("/restaurants/{restoran_id}/orders/{order_id}", response_model=Order)
+async def edit_order(restoran_id: str, order_id: str, payload: OrderUpdatePayload):
+    existing = await db.orders.find_one({"restoran_id": restoran_id, "id": order_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Order not found")
 
@@ -510,7 +681,7 @@ async def edit_order(code: str, order_id: str, payload: OrderUpdatePayload):
         new_lines: List[dict] = []
         total = 0.0
         for line_in in payload.lines:
-            item = await db.items.find_one({"room_code": code, "id": line_in.item_id})
+            item = await db.items.find_one({"restoran_id": restoran_id, "id": line_in.item_id})
             if not item:
                 continue
             qty = max(1, int(line_in.quantity))
@@ -532,56 +703,66 @@ async def edit_order(code: str, order_id: str, payload: OrderUpdatePayload):
         raise HTTPException(status_code=400, detail="Nothing to update")
 
     update["updated_at"] = now_iso()
-    await db.orders.update_one({"room_code": code, "id": order_id}, {"$set": update})
-    o = await db.orders.find_one({"room_code": code, "id": order_id})
+    await db.orders.update_one({"restoran_id": restoran_id, "id": order_id}, {"$set": update})
+    o = await db.orders.find_one({"restoran_id": restoran_id, "id": order_id})
     order_out = clean(o)
-    await manager.broadcast(code, {"event": "order_updated", "order": order_out})
+    
+    # Get restaurant code for WebSocket broadcast
+    restaurant = await db.restaurants.find_one({"id": restoran_id})
+    if restaurant:
+        await manager.broadcast(restaurant["code"], {"event": "order_updated", "order": order_out})
+    
     return Order(**order_out)
 
 
-@api_router.put("/rooms/{code}/orders/{order_id}/status", response_model=Order)
-async def update_order_status(code: str, order_id: str, payload: OrderStatusUpdate):
+@api_router.put("/restaurants/{restoran_id}/orders/{order_id}/status", response_model=Order)
+async def update_order_status(restoran_id: str, order_id: str, payload: OrderStatusUpdate):
     if payload.status not in ("new", "preparing", "ready", "served", "cancelled"):
         raise HTTPException(status_code=400, detail="Invalid status")
+    
     result = await db.orders.update_one(
-        {"room_code": code, "id": order_id},
+        {"restoran_id": restoran_id, "id": order_id},
         {"$set": {"status": payload.status, "updated_at": now_iso()}},
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Order not found")
-    o = await db.orders.find_one({"room_code": code, "id": order_id})
+    
+    o = await db.orders.find_one({"restoran_id": restoran_id, "id": order_id})
     order_out = clean(o)
-    await manager.broadcast(code, {"event": "order_updated", "order": order_out})
+    
+    # Get restaurant code for WebSocket broadcast
+    restaurant = await db.restaurants.find_one({"id": restoran_id})
+    if restaurant:
+        await manager.broadcast(restaurant["code"], {"event": "order_updated", "order": order_out})
 
-    # Push notification to the waiter when order is ready to pick up
-    # (waiters are the ones who mark orders as served, so no push on served)
-    if payload.status == "ready":
-        try:
-            await send_push(
-                recipients=[push_user_id(code, order_out["waiter_name"])],
-                data={
-                    "title": f"Table {order_out['table_number']} · Ready for pickup",
-                    "message": "The kitchen has your order ready — deliver and mark served.",
-                    "action_url": "/waiter/orders",
-                },
-                idempotency_key=f"{order_out['id']}-ready",
-            )
-        except Exception as e:
-            logging.getLogger(__name__).warning("push failed (non-blocking): %s", e)
+        # Push notification to the waiter when order is ready to pick up
+        if payload.status == "ready":
+            try:
+                await send_push(
+                    recipients=[push_user_id(restoran_id, order_out["waiter_name"])],
+                    data={
+                        "title": f"Table {order_out['table_number']} · Ready for pickup",
+                        "message": "The kitchen has your order ready — deliver and mark served.",
+                        "action_url": "/waiter/orders",
+                    },
+                    idempotency_key=f"{order_out['id']}-ready",
+                )
+            except Exception as e:
+                logging.getLogger(__name__).warning("push failed (non-blocking): %s", e)
 
     return Order(**order_out)
 
 
 # -------------------- Stats --------------------
 
-@api_router.get("/rooms/{code}/stats")
-async def get_stats(code: str):
+@api_router.get("/restaurants/{restoran_id}/stats")
+async def get_stats(restoran_id: str):
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     today_iso = today_start.isoformat()
     week_start = (today_start - timedelta(days=6)).isoformat()
 
     all_orders = await db.orders.find({
-        "room_code": code,
+        "restoran_id": restoran_id,
         "status": {"$ne": "cancelled"},
     }).to_list(5000)
 
@@ -624,8 +805,8 @@ async def get_stats(code: str):
 
 @api_router.websocket("/ws/{code}")
 async def ws_room(websocket: WebSocket, code: str):
-    room = await db.rooms.find_one({"code": code})
-    if not room:
+    restaurant = await db.restaurants.find_one({"code": code})
+    if not restaurant:
         await websocket.close(code=4404)
         return
     await manager.connect(code, websocket)
