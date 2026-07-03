@@ -57,16 +57,22 @@ export default function TabletOrders() {
   useEffect(() => {
     (async () => {
       const c = await session.getCode();
-      if (!c) {
+      const rid = await session.getRestoranId();
+      if (!c || !rid) {
         router.replace("/tablet/setup");
         return;
       }
       setCode(c);
       try {
-        const [room, orderList] = await Promise.all([api.getRoom(c), api.listOrders(c, true)]);
+        const [room, orderList] = await Promise.all([
+          api.getRoom(rid),
+          api.listOrders(rid, true)
+        ]);
         setRestaurantName(room.name);
         setOrders(orderList);
-      } catch {}
+      } catch (e) {
+        console.error("Failed to load initial data:", e);
+      }
       setLoading(false);
     })();
   }, [router]);
@@ -95,31 +101,55 @@ export default function TabletOrders() {
 
   const advance = async (o: Order) => {
     const next = NEXT[o.status];
-    if (!next || !code) return;
+    if (!next || !code) {
+      Alert.alert("Error", "Missing code or invalid status");
+      return;
+    }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     try {
+      console.log(`Advancing order ${o.id} to ${next}`);
       const updated = await api.updateOrderStatus(code, o.id, next);
-      setOrders((prev) => prev.map((x) => (x.id === o.id ? updated : x)));
+      console.log("Order updated successfully:", updated);
+      setOrders((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     } catch (e: any) {
+      console.error("Failed to advance order:", e);
       Alert.alert("Update failed", e?.message || "Try again");
     }
   };
 
-  const cancelOrder = (o: Order) => {
-    if (!code) return;
-    Alert.alert("Cancel order?", `Cancel order for Table ${o.table_number}?`, [
-      { text: "No", style: "cancel" },
-      {
-        text: "Cancel order",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            const updated = await api.updateOrderStatus(code, o.id, "cancelled");
-            setOrders((prev) => prev.map((x) => (x.id === o.id ? updated : x)));
-          } catch {}
-        },
-      },
-    ]);
+  const cancelOrder = async (o: Order) => {
+    if (!code) {
+      Alert.alert("Error", "Missing restaurant code");
+      return;
+    }
+    try {
+      const result = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          "Cancel order?",
+          `Cancel order for Table ${o.table_number}?`,
+          [
+            { text: "No", style: "cancel", onPress: () => resolve(false) },
+            {
+              text: "Cancel",
+              style: "destructive",
+              onPress: () => resolve(true),
+            },
+          ],
+        );
+      });
+
+      if (!result) return;
+
+      console.log(`Cancelling order ${o.id}`);
+      const updated = await api.updateOrderStatus(code, o.id, "cancelled");
+      console.log("Order cancelled successfully:", updated);
+      setOrders((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    } catch (e: any) {
+      console.error("Failed to cancel order:", e);
+      Alert.alert("Error", e?.message || "Could not cancel order");
+    }
   };
 
   return (

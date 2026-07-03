@@ -38,9 +38,10 @@ export default function TabletMenu() {
   useEffect(() => {
     (async () => {
       const c = await session.getCode();
-      if (!c) return;
+      const rid = await session.getRestoranId();
+      if (!c || !rid) return;
       setCode(c);
-      const [cs, is] = await Promise.all([api.listCategories(c), api.listItems(c)]);
+      const [cs, is] = await Promise.all([api.listCategories(rid), api.listItems(rid)]);
       setCats(cs);
       setItems(is);
       setSelectedCat(cs[0]?.id || null);
@@ -192,27 +193,29 @@ export default function TabletMenu() {
           </View>
         ) : (
           filtered.map((it) => (
-            <Pressable
-              key={it.id}
-              testID={`menu-item-${it.id}`}
-              onPress={() => openEditItem(it)}
-              style={styles.itemCard}
-            >
-              <View style={{ flex: 1 }}>
+            <View key={it.id} style={styles.itemCard}>
+              <Pressable
+                testID={`menu-item-${it.id}`}
+                onPress={() => openEditItem(it)}
+                style={{ flex: 1 }}
+              >
                 <Text style={[styles.itemName, !it.available && styles.itemOff]}>{it.name}</Text>
                 {it.description ? <Text style={styles.itemDesc}>{it.description}</Text> : null}
                 <Text style={styles.itemPrice}>${it.price.toFixed(2)}</Text>
-              </View>
+              </Pressable>
               <View style={styles.itemRight}>
                 <Text style={styles.availLbl}>{it.available ? "On" : "Off"}</Text>
-                <Switch
-                  value={it.available}
-                  onValueChange={() => toggleAvail(it)}
-                  trackColor={{ false: theme.color.border, true: theme.color.brandSoft }}
-                  thumbColor={it.available ? theme.color.brand : theme.color.borderStrong}
-                />
+                <Pressable
+                  testID={`menu-item-toggle-${it.id}`}
+                  onPress={() => toggleAvail(it)}
+                  style={styles.switchContainer}
+                >
+                  <View style={[styles.switchTrack, it.available && styles.switchTrackActive]}>
+                    <View style={[styles.switchThumb, it.available && styles.switchThumbActive]} />
+                  </View>
+                </Pressable>
               </View>
-            </Pressable>
+            </View>
           ))
         )}
       </ScrollView>
@@ -358,8 +361,38 @@ const styles = StyleSheet.create({
   itemOff: { color: theme.color.borderStrong, textDecorationLine: "line-through" },
   itemDesc: { fontSize: theme.font.sm, color: theme.color.onSurfaceMuted, marginTop: 2 },
   itemPrice: { fontSize: theme.font.base, fontWeight: "700", color: theme.color.brand, marginTop: 6 },
-  itemRight: { alignItems: "center", gap: 4 },
-  availLbl: { fontSize: theme.font.sm, color: theme.color.onSurfaceMuted },
+  itemRight: { alignItems: "center", gap: 4, flexDirection: "row" },
+  availLbl: { fontSize: theme.font.sm, color: theme.color.onSurfaceMuted, marginRight: 8 },
+  switchContainer: {
+    width: 50,
+    height: 30,
+    justifyContent: "center",
+  },
+  switchTrack: {
+    width: 50,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: theme.color.border,
+    justifyContent: "center",
+    paddingHorizontal: 2,
+  },
+  switchTrackActive: {
+    backgroundColor: theme.color.brand,
+  },
+  switchThumb: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: "#fff",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  switchThumbActive: {
+    alignSelf: "flex-end",
+  },
   empty: { alignItems: "center", padding: theme.space.xxxl, gap: theme.space.md },
   emptyText: { color: theme.color.onSurfaceMuted },
   modalWrap: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", padding: theme.space.lg },

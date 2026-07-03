@@ -13,13 +13,13 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 # Import database configuration (avoids circular imports)
-from backend.database import db, get_db, SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, client
+from database import db, get_db, SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, client
 
 app = FastAPI(title="ServeSync API")
 api_router = APIRouter(prefix="/api")
 
 # Import and include admin routes
-from backend.admin_routes import admin_router
+from admin_routes import admin_router
 app.include_router(admin_router)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -660,8 +660,8 @@ async def create_order(restoran_id: str, payload: OrderCreate):
     await db.orders.insert_one(order)
     order_out = clean(order)
     
-    # Broadcast using restaurant code
-    await manager.broadcast(restaurant["code"], {"event": "order_created", "order": order_out})
+    # Broadcast using restaurant daily code
+    await manager.broadcast(restaurant["gunluk_kod"], {"event": "order_created", "order": order_out})
     return Order(**order_out)
 
 
@@ -707,10 +707,10 @@ async def edit_order(restoran_id: str, order_id: str, payload: OrderUpdatePayloa
     o = await db.orders.find_one({"restoran_id": restoran_id, "id": order_id})
     order_out = clean(o)
     
-    # Get restaurant code for WebSocket broadcast
+    # Get restaurant daily code for WebSocket broadcast
     restaurant = await db.restaurants.find_one({"id": restoran_id})
     if restaurant:
-        await manager.broadcast(restaurant["code"], {"event": "order_updated", "order": order_out})
+        await manager.broadcast(restaurant["gunluk_kod"], {"event": "order_updated", "order": order_out})
     
     return Order(**order_out)
 
@@ -730,10 +730,10 @@ async def update_order_status(restoran_id: str, order_id: str, payload: OrderSta
     o = await db.orders.find_one({"restoran_id": restoran_id, "id": order_id})
     order_out = clean(o)
     
-    # Get restaurant code for WebSocket broadcast
+    # Get restaurant daily code for WebSocket broadcast
     restaurant = await db.restaurants.find_one({"id": restoran_id})
     if restaurant:
-        await manager.broadcast(restaurant["code"], {"event": "order_updated", "order": order_out})
+        await manager.broadcast(restaurant["gunluk_kod"], {"event": "order_updated", "order": order_out})
 
         # Push notification to the waiter when order is ready to pick up
         if payload.status == "ready":
@@ -803,23 +803,23 @@ async def get_stats(restoran_id: str):
 
 # -------------------- WebSocket --------------------
 
-@api_router.websocket("/ws/{code}")
-async def ws_room(websocket: WebSocket, code: str):
-    restaurant = await db.restaurants.find_one({"code": code})
+@api_router.websocket("/ws/{gunluk_kod}")
+async def ws_room(websocket: WebSocket, gunluk_kod: str):
+    restaurant = await db.restaurants.find_one({"gunluk_kod": gunluk_kod})
     if not restaurant:
         await websocket.close(code=4404)
         return
-    await manager.connect(code, websocket)
+    await manager.connect(gunluk_kod, websocket)
     try:
         # Send hello
-        await websocket.send_json({"event": "connected", "code": code})
+        await websocket.send_json({"event": "connected", "gunluk_kod": gunluk_kod})
         while True:
             # Keep connection open. We accept but ignore inbound messages.
             _ = await websocket.receive_text()
     except WebSocketDisconnect:
-        manager.disconnect(code, websocket)
+        manager.disconnect(gunluk_kod, websocket)
     except Exception:
-        manager.disconnect(code, websocket)
+        manager.disconnect(gunluk_kod, websocket)
 
 
 # -------------------- Wire up --------------------

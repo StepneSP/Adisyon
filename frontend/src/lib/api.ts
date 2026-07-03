@@ -103,6 +103,7 @@ export type AdminLoginResponse = {
   restaurant_id: string;
   restaurant_name: string;
   owner_email: string;
+  gunluk_kod: string;
 };
 
 export type AdminInfo = {

@@ -29,7 +29,7 @@ export default function AdminLogin() {
     (async () => {
       const token = await session.getAdminToken();
       if (token) {
-        router.replace("/admin/index");
+        router.replace("/admin");
       }
     })();
   }, [router]);
@@ -51,23 +51,27 @@ export default function AdminLogin() {
     setError("");
     
     try {
+      // Clear any existing session data first
+      await session.reset();
+      
       const response = await adminApi.login({
         email: emailTrimmed,
         password: passwordTrimmed,
       });
 
-      // Save admin session
+      // Save admin session with fresh data from backend
       await session.setAdminToken(response.access_token);
       await session.setAdminEmail(response.owner_email);
       await session.setRestoranId(response.restaurant_id);
       await session.setRestoranAdi(response.restaurant_name);
-      await session.setRole("admin");
+      await session.setCode(response.gunluk_kod);
+      await session.setRole("tablet");
 
       // Success feedback
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
 
-      // Navigate to admin dashboard
-      router.replace("/admin/index");
+      // Navigate to tablet/server dashboard
+      router.replace("/tablet");
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Giriş başarısız";
       console.error("Admin login error:", errorMessage);
@@ -166,6 +170,7 @@ export default function AdminLogin() {
               <Text style={styles.primaryBtnText}>Giriş Yap</Text>
             )}
           </Pressable>
+
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -240,7 +245,8 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   footer: { 
-    padding: theme.space.xl 
+    padding: theme.space.xl,
+    gap: theme.space.md,
   },
   primaryBtn: {
     backgroundColor: theme.color.brand,
@@ -252,5 +258,14 @@ const styles = StyleSheet.create({
     color: "#fff", 
     fontWeight: "700", 
     fontSize: theme.font.lg 
+  },
+  registerLink: {
+    paddingVertical: theme.space.md,
+    alignItems: "center",
+  },
+  registerText: {
+    color: theme.color.brand,
+    fontSize: theme.font.base,
+    fontWeight: "600",
   },
 });

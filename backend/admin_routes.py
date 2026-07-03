@@ -11,7 +11,7 @@ import uuid
 from jose import jwt
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from backend.database import db, get_db, ACCESS_TOKEN_EXPIRE_MINUTES, ALGORITHM, SECRET_KEY
+from database import db, get_db, ACCESS_TOKEN_EXPIRE_MINUTES, ALGORITHM, SECRET_KEY
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -33,6 +33,7 @@ class AdminLoginResponse(BaseModel):
     restaurant_id: str
     restaurant_name: str
     owner_email: str
+    gunluk_kod: str
 
 
 class RestaurantUpdatePayload(BaseModel):
@@ -125,6 +126,7 @@ async def admin_login(payload: AdminLoginPayload, db: AsyncIOMotorDatabase = Dep
         restaurant_id=restaurant["id"],
         restaurant_name=restaurant["name"],
         owner_email=payload.email,
+        gunluk_kod=restaurant.get("gunluk_kod", ""),
     )
 
 

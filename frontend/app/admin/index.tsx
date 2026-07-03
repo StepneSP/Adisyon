@@ -28,9 +28,15 @@ export default function AdminDashboard() {
 
   const loadData = async () => {
     try {
+      const rid = await session.getRestoranId();
+      if (!rid) {
+        setError("Restoran bilgisi bulunamadı.");
+        return;
+      }
+
       const [adminInfo, statsData] = await Promise.all([
         adminApi.getMe(),
-        adminApi.getStats(restaurantId),
+        adminApi.getStats(rid),
       ]);
       
       setRestaurantName(adminInfo.restaurant_name);
@@ -57,7 +63,6 @@ export default function AdminDashboard() {
         return;
       }
       
-      setRestaurantId(rid);
       await loadData();
     })();
   }, [router]);

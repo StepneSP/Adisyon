@@ -45,15 +45,15 @@ export default function Index() {
           style={({ pressed }) => [styles.card, styles.cardBrand, pressed && styles.pressed]}
           onPress={async () => {
             await session.setRole("tablet");
-            router.replace("/tablet/setup");
+            router.replace("/admin/login");
           }}
         >
           <View style={styles.iconWrap}>
             <Feather name="monitor" size={44} color={theme.color.onBrand} />
           </View>
-          <Text style={[styles.cardTitle, { color: theme.color.onBrand }]}>This is the Server</Text>
+          <Text style={[styles.cardTitle, { color: theme.color.onBrand }]}>Sunucu / Kasa</Text>
           <Text style={[styles.cardSub, { color: theme.color.brandTint }]}>
-            Tablet · Kitchen display · Menu editor
+            Tablet · Mutfak ekranı · Menü düzenleme
           </Text>
         </Pressable>
 
@@ -68,9 +68,9 @@ export default function Index() {
           <View style={[styles.iconWrap, { backgroundColor: theme.color.brandTint }]}>
             <Feather name="smartphone" size={44} color={theme.color.brand} />
           </View>
-          <Text style={[styles.cardTitle, { color: theme.color.onSurface }]}>I&apos;m a Waiter</Text>
+          <Text style={[styles.cardTitle, { color: theme.color.onSurface }]}>Garson</Text>
           <Text style={[styles.cardSub, { color: theme.color.onSurfaceMuted }]}>
-            Phone · Take orders · Send to kitchen
+            Telefon · Sipariş al · Mutfağa gönder
           </Text>
         </Pressable>
       </View>
